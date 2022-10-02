@@ -1,8 +1,8 @@
+use futures_tungstenite::{accept_async, tungstenite::Error};
 use futures_util::{SinkExt, StreamExt};
 use log::*;
+use smol::net::{TcpListener, TcpStream};
 use std::net::SocketAddr;
-use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::{accept_async, tungstenite::Error};
 use tungstenite::Result;
 
 async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
@@ -29,18 +29,19 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     env_logger::init();
 
-    let addr = "127.0.0.1:9002";
-    let listener = TcpListener::bind(&addr).await.expect("Can't listen");
-    info!("Listening on: {}", addr);
+    smol::block_on(async {
+        let addr = "127.0.0.1:9002";
+        let listener = TcpListener::bind(&addr).await.expect("Can't listen");
+        info!("Listening on: {}", addr);
 
-    while let Ok((stream, _)) = listener.accept().await {
-        let peer = stream.peer_addr().expect("connected streams should have a peer address");
-        info!("Peer address: {}", peer);
+        while let Ok((stream, _)) = listener.accept().await {
+            let peer = stream.peer_addr().expect("connected streams should have a peer address");
+            info!("Peer address: {}", peer);
 
-        tokio::spawn(accept_connection(peer, stream));
-    }
+            smol::spawn(accept_connection(peer, stream)).detach();
+        }
+    });
 }

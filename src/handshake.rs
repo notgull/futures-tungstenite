@@ -2,6 +2,7 @@ use crate::{
     compat::{AllowStd, SetWaker},
     WebSocketStream,
 };
+use futures_lite::io::{AsyncRead, AsyncWrite};
 use log::*;
 use std::{
     future::Future,
@@ -9,7 +10,6 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWrite};
 use tungstenite::{
     handshake::{
         client::Response, server::Callback, HandshakeError as Error, HandshakeRole,

@@ -2,12 +2,12 @@ use log::*;
 use std::{
     io::{Read, Write},
     pin::Pin,
-    task::{Context, Poll},
+    sync::Arc,
+    task::{Context, Poll, Wake, Waker},
 };
 
-use futures_util::task;
-use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use atomic_waker::AtomicWaker;
+use futures_lite::io::{AsyncRead, AsyncWrite};
 use tungstenite::Error as WsError;
 
 pub(crate) enum ContextWaker {
@@ -51,17 +51,17 @@ pub(crate) struct AllowStd<S> {
 //
 // Don't ever use this from multiple tasks at the same time!
 pub(crate) trait SetWaker {
-    fn set_waker(&self, waker: &task::Waker);
+    fn set_waker(&self, waker: &Waker);
 }
 
 impl<S> SetWaker for AllowStd<S> {
-    fn set_waker(&self, waker: &task::Waker) {
+    fn set_waker(&self, waker: &Waker) {
         self.set_waker(ContextWaker::Read, waker);
     }
 }
 
 impl<S> AllowStd<S> {
-    pub(crate) fn new(inner: S, waker: &task::Waker) -> Self {
+    pub(crate) fn new(inner: S, waker: &Waker) -> Self {
         let res = Self {
             inner,
             write_waker_proxy: Default::default(),
@@ -84,7 +84,7 @@ impl<S> AllowStd<S> {
     //
     // Write: this is only supposde to be called by write operations, i.e. the Sink impl on the
     // WebSocketStream.
-    pub(crate) fn set_waker(&self, kind: ContextWaker, waker: &task::Waker) {
+    pub(crate) fn set_waker(&self, kind: ContextWaker, waker: &Waker) {
         match kind {
             ContextWaker::Read => {
                 self.write_waker_proxy.read_waker.register(waker);
@@ -104,14 +104,18 @@ impl<S> AllowStd<S> {
 // reads and writes, and the same for writes.
 #[derive(Debug, Default)]
 struct WakerProxy {
-    read_waker: task::AtomicWaker,
-    write_waker: task::AtomicWaker,
+    read_waker: AtomicWaker,
+    write_waker: AtomicWaker,
 }
 
-impl task::ArcWake for WakerProxy {
-    fn wake_by_ref(arc_self: &Arc<Self>) {
-        arc_self.read_waker.wake();
-        arc_self.write_waker.wake();
+impl Wake for WakerProxy {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.read_waker.wake();
+        self.write_waker.wake();
     }
 }
 
@@ -125,10 +129,10 @@ where
     {
         trace!("{}:{} AllowStd.with_context", file!(), line!());
         let waker = match kind {
-            ContextWaker::Read => task::waker_ref(&self.read_waker_proxy),
-            ContextWaker::Write => task::waker_ref(&self.write_waker_proxy),
+            ContextWaker::Read => Waker::from(self.read_waker_proxy.clone()),
+            ContextWaker::Write => Waker::from(self.write_waker_proxy.clone()),
         };
-        let mut context = task::Context::from_waker(&waker);
+        let mut context = Context::from_waker(&waker);
         f(&mut context, Pin::new(&mut self.inner))
     }
 
@@ -147,13 +151,11 @@ where
 {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         trace!("{}:{} Read.read", file!(), line!());
-        let mut buf = ReadBuf::new(buf);
         match self.with_context(ContextWaker::Read, |ctx, stream| {
             trace!("{}:{} Read.with_context read -> poll_read", file!(), line!());
-            stream.poll_read(ctx, &mut buf)
+            stream.poll_read(ctx, buf)
         }) {
-            Poll::Ready(Ok(_)) => Ok(buf.filled().len()),
-            Poll::Ready(Err(err)) => Err(err),
+            Poll::Ready(res) => res,
             Poll::Pending => Err(std::io::Error::from(std::io::ErrorKind::WouldBlock)),
         }
     }

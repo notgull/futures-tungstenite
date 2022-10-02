@@ -1,6 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use log::*;
-use tokio_tungstenite::{
+use futures_tungstenite::{
     connect_async,
     tungstenite::{Error, Result},
 };

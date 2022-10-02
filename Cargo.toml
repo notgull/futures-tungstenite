@@ -1,5 +1,5 @@
 [package]
-name = "tokio-tungstenite"
+name = "futures-tungstenite"
 description = "Tokio binding for Tungstenite, the Lightweight stream-based WebSocket implementation"
 categories = ["web-programming::websocket", "network-programming", "asynchronous", "concurrency"]
 keywords = ["websocket", "io", "web"]
@@ -15,60 +15,23 @@ include = ["examples/**/*", "src/**/*", "LICENSE", "README.md", "CHANGELOG.md"]
 [package.metadata.docs.rs]
 features = ["native-tls", "__rustls-tls"]
 
-[features]
-default = ["connect"]
-connect = ["stream", "tokio/net"]
-native-tls = ["native-tls-crate", "tokio-native-tls", "stream", "tungstenite/native-tls"]
-native-tls-vendored = ["native-tls", "native-tls-crate/vendored", "tungstenite/native-tls-vendored"]
-rustls-tls-native-roots = ["__rustls-tls", "rustls-native-certs"]
-rustls-tls-webpki-roots = ["__rustls-tls", "webpki-roots"]
-__rustls-tls = ["rustls", "tokio-rustls", "stream", "tungstenite/__rustls-tls", "webpki"]
-stream = []
-
 [dependencies]
+atomic-waker = "1.0.0"
+futures-core = "0.3.24"
+futures-lite = "1.12.0"
+futures-sink = "0.3.24"
 log = "0.4"
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-tokio = { version = "1.0.0", default-features = false, features = ["io-util"] }
 
 [dependencies.tungstenite]
 version = "0.17.3"
 default-features = false
 
-[dependencies.native-tls-crate]
-optional = true
-package = "native-tls"
-version = "0.2.7"
-
-[dependencies.rustls]
-optional = true
-version = "0.20.0"
-
-[dependencies.rustls-native-certs]
-optional = true
-version = "0.6.1"
-
-[dependencies.tokio-native-tls]
-optional = true
-version = "0.3.0"
-
-[dependencies.tokio-rustls]
-optional = true
-version = "0.23.0"
-
-[dependencies.webpki]
-optional = true
-version = "0.22.0"
-
-[dependencies.webpki-roots]
-optional = true
-version = "0.22.1"
-
 [dev-dependencies]
-futures-channel = "0.3"
+futures-util = { version = "0.3.24", features = ["sink"] }
 hyper = { version = "0.14", default-features = false, features = ["http1", "server", "tcp"] }
-tokio = { version = "1.0.0", default-features = false, features = ["io-std", "macros", "net", "rt-multi-thread", "time"] }
 url = "2.0.0"
 env_logger = "0.9"
+smol = "1.2.5"
 
 [[example]]
 name = "autobahn-client"

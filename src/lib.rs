@@ -13,27 +13,21 @@
 pub use tungstenite;
 
 mod compat;
-#[cfg(feature = "connect")]
-mod connect;
 mod handshake;
-#[cfg(feature = "stream")]
-mod stream;
-#[cfg(any(feature = "native-tls", feature = "__rustls-tls", feature = "connect"))]
-mod tls;
 
 use std::io::{Read, Write};
 
 use compat::{cvt, AllowStd, ContextWaker};
-use futures_util::{
-    sink::{Sink, SinkExt},
-    stream::{FusedStream, Stream},
+use futures_lite::{
+    io::{AsyncRead, AsyncWrite},
+    stream::Stream,
 };
+use futures_sink::Sink;
 use log::*;
 use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use tungstenite::{
     client::IntoClientRequest,
@@ -45,20 +39,6 @@ use tungstenite::{
     },
     protocol::{Message, Role, WebSocket, WebSocketConfig},
 };
-
-#[cfg(any(feature = "native-tls", feature = "__rustls-tls", feature = "connect"))]
-pub use tls::Connector;
-#[cfg(any(feature = "native-tls", feature = "__rustls-tls"))]
-pub use tls::{client_async_tls, client_async_tls_with_config};
-
-#[cfg(feature = "connect")]
-pub use connect::{connect_async, connect_async_with_config};
-
-#[cfg(all(any(feature = "native-tls", feature = "__rustls-tls"), feature = "connect"))]
-pub use connect::connect_async_tls_with_config;
-
-#[cfg(feature = "stream")]
-pub use stream::MaybeTlsStream;
 
 use tungstenite::protocol::CloseFrame;
 
@@ -260,7 +240,28 @@ impl<S> WebSocketStream<S> {
         S: AsyncRead + AsyncWrite + Unpin,
     {
         let msg = msg.map(|msg| msg.into_owned());
-        self.send(Message::Close(msg)).await
+
+        // (notgull): I don't feel like importing futures-util for SinkExt, so I'll just
+        // do this manually
+        let mut item = Some(Message::Close(msg));
+        futures_lite::future::poll_fn(move |cx| {
+            // Wait until the sink is ready to receive an item.
+            loop {
+                let mut this = Pin::new(&mut *self);
+
+                if item.is_some() {
+                    // We need to wait for readiness.
+                    futures_lite::ready!(this.as_mut().poll_ready(cx))?;
+
+                    // Once we're ready, we can send the item.
+                    this.start_send(item.take().unwrap())?;
+                } else {
+                    // Wait for the item to be flushed.
+                    return this.poll_flush(cx);
+                }
+            }
+        })
+        .await
     }
 }
 
@@ -280,7 +281,7 @@ where
             return Poll::Ready(None);
         }
 
-        match futures_util::ready!(self.with_context(Some((ContextWaker::Read, cx)), |s| {
+        match futures_lite::ready!(self.with_context(Some((ContextWaker::Read, cx)), |s| {
             trace!("{}:{} Stream.with_context poll_next -> read_message()", file!(), line!());
             cvt(s.read_message())
         })) {
@@ -297,7 +298,7 @@ where
     }
 }
 
-impl<T> FusedStream for WebSocketStream<T>
+impl<T> futures_core::stream::FusedStream for WebSocketStream<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
@@ -371,33 +372,22 @@ fn domain(request: &tungstenite::handshake::client::Request) -> Result<String, W
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "connect")]
-    use crate::stream::MaybeTlsStream;
     use crate::{compat::AllowStd, WebSocketStream};
-    use std::io::{Read, Write};
-    #[cfg(feature = "connect")]
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use smol::Async;
+    use std::{
+        io::{Read, Write},
+        net::TcpStream,
+    };
 
     fn is_read<T: Read>() {}
     fn is_write<T: Write>() {}
-    #[cfg(feature = "connect")]
-    fn is_async_read<T: AsyncReadExt>() {}
-    #[cfg(feature = "connect")]
-    fn is_async_write<T: AsyncWriteExt>() {}
     fn is_unpin<T: Unpin>() {}
 
     #[test]
     fn web_socket_stream_has_traits() {
-        is_read::<AllowStd<tokio::net::TcpStream>>();
-        is_write::<AllowStd<tokio::net::TcpStream>>();
+        is_read::<AllowStd<Async<TcpStream>>>();
+        is_write::<AllowStd<Async<TcpStream>>>();
 
-        #[cfg(feature = "connect")]
-        is_async_read::<MaybeTlsStream<tokio::net::TcpStream>>();
-        #[cfg(feature = "connect")]
-        is_async_write::<MaybeTlsStream<tokio::net::TcpStream>>();
-
-        is_unpin::<WebSocketStream<tokio::net::TcpStream>>();
-        #[cfg(feature = "connect")]
-        is_unpin::<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>>();
+        is_unpin::<WebSocketStream<smol::net::TcpStream>>();
     }
 }

@@ -25,10 +25,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use futures_channel::mpsc::{unbounded, UnboundedSender};
+use smol::channel::{unbounded, Sender};
 use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
 
-use tokio::net::{TcpListener, TcpStream};
+use smol::net::{TcpListener, TcpStream};
 use tungstenite::protocol::Message;
 
 type Tx = UnboundedSender<Message>;
